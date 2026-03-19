@@ -8,6 +8,10 @@ GraphDigitizer is a desktop tool for digitizing data points from graph images. I
 - Exporting digitized data to CSV/TXT (and an optional “swath coverage curve” export)
 - Saving/loading sessions to resume work later
 
+## Example
+
+![GraphDigitizer screenshot](media/GraphDigitizer.jpg)
+
 Paul Johnson
 Center for Coastal and Ocean Mapping
 University of New Hampshire
