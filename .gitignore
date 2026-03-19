@@ -51,3 +51,6 @@ Thumbs.db
 # Log files
 *.log
 
+# EMcalc data directory (not source)
+EMcalc/
+

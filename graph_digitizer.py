@@ -10,7 +10,13 @@ Features:
 - Export data as CSV
 - Save/load digitization sessions
 - Zoom and pan functionality
+
+Paul Johnson, University of New Hampshire
+Center for Coastal and Ocean Mapping, University of New Hampshire
+pjohnson@ccom.unh.edu
+
 """
+
 
 import sys
 import os
@@ -52,7 +58,7 @@ except ImportError:
 # Version tracking for the application
 # __version__ = "2025.1"  # new program, program settings persist, image scaling works
 # __version__ = "2025.2"  # fixed image scaling issue, added more buttons
-__version__ = "2026.1"  # added dark fusion theme
+__version__ = "2026.01"  # added dark fusion theme
 
 
 class GraphDigitizer(QMainWindow):
