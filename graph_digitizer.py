@@ -156,32 +156,31 @@ class GraphDigitizer(QMainWindow):
         self.x_min_spin = QDoubleSpinBox()
         self.x_min_spin.setRange(-999999, 999999)
         self.x_min_spin.setValue(0)
+        self.x_min_spin.valueChanged.connect(self.axis_range_changed)
         calib_layout.addWidget(self.x_min_spin, 0, 1)
         
         self.x_max_spin = QDoubleSpinBox()
         self.x_max_spin.setRange(-999999, 999999)
         self.x_max_spin.setValue(1)
+        self.x_max_spin.valueChanged.connect(self.axis_range_changed)
         calib_layout.addWidget(self.x_max_spin, 0, 2)
         
         calib_layout.addWidget(QLabel("Y-axis range:"), 1, 0)
         self.y_min_spin = QDoubleSpinBox()
         self.y_min_spin.setRange(-999999, 999999)
         self.y_min_spin.setValue(0)
+        self.y_min_spin.valueChanged.connect(self.axis_range_changed)
         calib_layout.addWidget(self.y_min_spin, 1, 1)
         
         self.y_max_spin = QDoubleSpinBox()
         self.y_max_spin.setRange(-999999, 999999)
         self.y_max_spin.setValue(1)
+        self.y_max_spin.valueChanged.connect(self.axis_range_changed)
         calib_layout.addWidget(self.y_max_spin, 1, 2)
         
         self.calibrate_btn = QPushButton("Start Calibration")
         self.calibrate_btn.clicked.connect(self.start_calibration)
         calib_layout.addWidget(self.calibrate_btn, 2, 0, 1, 3)
-        
-        self.finish_calib_btn = QPushButton("Finish Calibration")
-        self.finish_calib_btn.clicked.connect(self.finish_calibration)
-        self.finish_calib_btn.setEnabled(False)
-        calib_layout.addWidget(self.finish_calib_btn, 3, 0, 1, 3)
         
         layout.addWidget(calib_group)
         
@@ -244,6 +243,8 @@ class GraphDigitizer(QMainWindow):
         self.points_table.setColumnCount(4)
         self.points_table.setHorizontalHeaderLabels(["X (Real)", "Y (Real)", "X (Pixel)", "Y (Pixel)"])
         self.points_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        # Keep table edits in sync with the exported data.
+        self.points_table.itemChanged.connect(self.points_table_item_changed)
         data_layout.addWidget(self.points_table)
         
         layout.addWidget(data_group)
@@ -530,23 +531,83 @@ class GraphDigitizer(QMainWindow):
             self.zoom_out()
             
     def start_calibration(self):
-        """Start the calibration process."""
+        """Start/stop calibration process (single button control)."""
         if self.original_pixmap is None:
             QMessageBox.warning(self, "Warning", "Please load an image first.")
             return
-            
+
+        # If already calibrating, clicking the button stops calibration.
+        if hasattr(self, "calibration_mode") and self.calibration_mode:
+            point_count = len(self.calibration_points)
+
+            self.calibration_mode = False
+            self.image_label.setCursor(Qt.CursorShape.ArrowCursor)
+
+            # If only one point was selected, revert to "Start Calibration".
+            if point_count < 2:
+                self.calibrated = False
+                self.calibration_points = []
+                self.calibrate_btn.setText("Start Calibration")
+                self.status_bar.showMessage("Calibration stopped after selecting one point. Start Calibration to try again.")
+            else:
+                self.calibrated = True
+                self.calibrate_btn.setText("Re-Do Calibration")
+                self.status_bar.showMessage("Calibration complete. Ready to digitize.")
+
+            self.update_buttons()
+            return
+
+        # Not calibrating: start fresh calibration.
         self.calibration_mode = True
         self.calibration_points = []
         self.calibrated = False
-        
+
         # Set crosshair cursor for precise calibration
         self.image_label.setCursor(Qt.CursorShape.CrossCursor)
-        
-        self.calibrate_btn.setEnabled(False)
-        self.finish_calib_btn.setEnabled(True)
-        
-        self.status_bar.showMessage("Click on two points to define the axes. First point: origin, Second point: max values.")
-        
+        self.calibrate_btn.setText("Calibrating.  Click to Stop")
+        self.update_buttons()
+        self.status_bar.showMessage(
+            "Calibration started. Click two points (first = origin, second = max). Click this button again to stop."
+        )
+
+    def axis_range_changed(self):
+        """
+        Recalculate real-coordinate values when axis ranges change.
+
+        - Updates stored calibration real values (origin/max) when present.
+        - Recomputes digitized_points' real_x/real_y from the pixel/image coordinates.
+        """
+        # Only meaningful once we have a full calibration (two points define mapping).
+        if not (self.calibrated and len(self.calibration_points) >= 2):
+            # Still keep the overlay labels for calibration points somewhat consistent.
+            if len(self.calibration_points) >= 1:
+                x1 = self.x_min_spin.value()
+                y1 = self.y_min_spin.value()
+                p1 = self.calibration_points[0]
+                self.calibration_points[0] = (p1[0], p1[1], x1, y1)
+                self.update_image_display()
+            return
+
+        # Update calibration real values (origin and max) to match spin boxes.
+        p1 = self.calibration_points[0]  # origin
+        p2 = self.calibration_points[1]  # max
+        self.calibration_points[0] = (p1[0], p1[1], self.x_min_spin.value(), self.y_min_spin.value())
+        self.calibration_points[1] = (p2[0], p2[1], self.x_max_spin.value(), self.y_max_spin.value())
+
+        # Recompute digitized points real coordinates using updated calibration.
+        new_digitized = []
+        for point in self.digitized_points:
+            # point structure: (screen_x, screen_y, img_x, img_y, real_x, real_y)
+            screen_x, screen_y, img_x, img_y, _, _ = point
+            real_x, real_y = self.pixel_to_real_coords(img_x, img_y)
+            new_digitized.append((screen_x, screen_y, img_x, img_y, real_x, real_y))
+        self.digitized_points = new_digitized
+
+        self.update_points_table()
+        self.update_image_display()
+        self.update_buttons()
+        self.status_bar.showMessage("Axis ranges updated; recalculated real coordinates.")
+
     def add_calibration_point(self, pos: QPoint):
         """Add a calibration point."""
         if len(self.calibration_points) >= 2:
@@ -588,26 +649,35 @@ class GraphDigitizer(QMainWindow):
             real_x = self.x_max_spin.value()
             real_y = self.y_max_spin.value()
             self.calibration_points.append((img_x, img_y, real_x, real_y))
-            self.status_bar.showMessage("Calibration complete. You can now start digitizing.")
+
+            # Selecting the second point completes calibration automatically.
+            self.calibration_mode = False
+            self.calibrated = True
+            self.image_label.setCursor(Qt.CursorShape.ArrowCursor)
+            self.calibrate_btn.setText("Re-Do Calibration")
+            self.update_buttons()
+            self.status_bar.showMessage("Calibration complete. Ready to digitize.")
             
         self.update_image_display()
         
     def finish_calibration(self):
-        """Finish the calibration process."""
+        """Finish the calibration process (legacy helper)."""
         if len(self.calibration_points) < 2:
+            # Treat as a canceled/incomplete calibration.
+            self.calibration_mode = False
+            self.calibrated = False
+            self.calibration_points = []
+            self.image_label.setCursor(Qt.CursorShape.ArrowCursor)
+            self.calibrate_btn.setText("Start Calibration")
+            self.update_buttons()
             QMessageBox.warning(self, "Warning", "Please set at least 2 calibration points.")
             return
-            
+
         self.calibration_mode = False
         self.calibrated = True
-        
-        # Return to normal cursor
         self.image_label.setCursor(Qt.CursorShape.ArrowCursor)
-        
-        self.calibrate_btn.setEnabled(True)
-        self.finish_calib_btn.setEnabled(False)
-        self.digitize_btn.setEnabled(True)
-        
+        self.calibrate_btn.setText("Re-Do Calibration")
+        self.update_buttons()
         self.status_bar.showMessage("Calibration complete. Ready to digitize.")
         
     def start_digitizing(self):
@@ -695,6 +765,8 @@ class GraphDigitizer(QMainWindow):
         
     def update_points_table(self):
         """Update the points table display."""
+        # Avoid triggering itemChanged while we repopulate the table.
+        self.points_table.blockSignals(True)
         self.points_table.setRowCount(len(self.digitized_points))
         
         for i, point in enumerate(self.digitized_points):
@@ -703,7 +775,43 @@ class GraphDigitizer(QMainWindow):
             self.points_table.setItem(i, 1, QTableWidgetItem(f"{point[5]:.6f}"))  # real_y
             self.points_table.setItem(i, 2, QTableWidgetItem(f"{point[2]:.1f}"))  # img_x
             self.points_table.setItem(i, 3, QTableWidgetItem(f"{point[3]:.1f}"))  # img_y
-            
+        self.points_table.blockSignals(False)
+
+    def points_table_item_changed(self, item):
+        """
+        Sync user edits in the table into `self.digitized_points` for export.
+
+        Columns:
+        0 -> X (Real)  (updates point[4])
+        1 -> Y (Real)  (updates point[5])
+        2/3 -> pixels (not currently used for recalculation/export)
+        """
+        if item is None:
+            return
+
+        row = item.row()
+        col = item.column()
+        if row < 0 or row >= len(self.digitized_points):
+            return
+        if col not in (0, 1):
+            return
+
+        text = item.text().strip()
+        if not text:
+            return
+
+        try:
+            new_val = float(text)
+        except ValueError:
+            return
+
+        screen_x, screen_y, img_x, img_y, real_x, real_y = self.digitized_points[row]
+        if col == 0:
+            real_x = new_val
+        else:
+            real_y = new_val
+
+        self.digitized_points[row] = (screen_x, screen_y, img_x, img_y, real_x, real_y)
     def update_buttons(self):
         """Update button states based on current mode."""
         has_image = self.original_pixmap is not None
@@ -1028,6 +1136,9 @@ class GraphDigitizer(QMainWindow):
                 self.y_max_spin.setValue(y_range[1])
                 
                 # Update UI
+                self.calibration_mode = False
+                self.image_label.setCursor(Qt.CursorShape.ArrowCursor)
+                self.calibrate_btn.setText("Re-Do Calibration")
                 self.update_image_display()
                 self.update_points_table()
                 self.update_buttons()
